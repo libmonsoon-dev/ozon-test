@@ -25,18 +25,16 @@ func main() {
 	}
 	defer outputFile.Close()
 
-	if err := Solution(inputFile, outputFile); err != nil {
+	if err := Solution(bufio.NewReader(inputFile), outputFile); err != nil {
 		panic(err)
 	}
 }
 
-func Solution(rOrig io.Reader, w io.Writer) error {
+func Solution(r io.Reader, w io.Writer) error {
 	var (
 		target, value uint
 		result        uint8
 	)
-
-	r := bufio.NewReader(rOrig)
 
 	expectedValues := make(map[uint]struct{})
 
