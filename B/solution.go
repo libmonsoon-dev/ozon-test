@@ -43,6 +43,7 @@ func Solution() ([]Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db.Query(\"%v\"): %w", solutionQuery, err)
 	}
+	defer rows.Close()
 
 	results := make([]Result, 0, 10)
 	var i int
