@@ -2,31 +2,11 @@ package main
 
 import (
 	"runtime"
-	"sync"
 )
 
 const (
 	maxGoroutinesPerWorker = 100
 )
-
-type TreadSafeCounter struct {
-	value int
-	mu    sync.RWMutex
-}
-
-func (c *TreadSafeCounter) Increment() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.value++
-}
-
-func (c *TreadSafeCounter) Value() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	return c.value
-}
 
 func Merge2Channels(fn func(int) int, in1, in2 <-chan int, out chan<- int, n int) {
 	go merge2Channels(fn, in1, in2, out, n)
@@ -45,23 +25,30 @@ func merge2Channels(fn func(int) int, input1, input2 <-chan int, out chan<- int,
 }
 
 func worker(fn func(int) int, input <-chan int, output chan<- int, n int) {
-	currentJobId := new(TreadSafeCounter)
 	semaphore := make(chan struct{}, maxGoroutinesPerWorker)
+
+	data := NewTreadSafeMap(maxGoroutinesPerWorker)
+
+	go func(data *TreadSafeMap) {
+		for i := 0; i < n; i++ {
+			for {
+				if value, ok := data.LoadAndDelete(i); ok {
+					output <- value
+					break
+				}
+
+				runtime.Gosched()
+			}
+		}
+	}(data)
 
 	for i := 0; i < n; i++ {
 		semaphore <- struct{}{}
-		go run(fn, <-input, output, i, currentJobId, semaphore)
+		go run(fn, <-input, i, data, semaphore)
 	}
 }
 
-func run(fn func(int) int, arg int, output chan<- int, jobId int, currentJobId *TreadSafeCounter, semaphore <-chan struct{}) {
-	result := fn(arg)
-
-	for currentJobId.Value() != jobId {
-		runtime.Gosched()
-	}
-
-	output <- result
-	currentJobId.Increment()
+func run(fn func(int) int, arg int, jobId int, data *TreadSafeMap, semaphore <-chan struct{}) {
+	data.Store(jobId, fn(arg))
 	<-semaphore
 }
