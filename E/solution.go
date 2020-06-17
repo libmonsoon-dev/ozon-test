@@ -1,9 +1,5 @@
 package main
 
-import (
-	"runtime"
-)
-
 const (
 	maxGoroutinesPerWorker = 100
 )
@@ -31,14 +27,7 @@ func worker(fn func(int) int, input <-chan int, output chan<- int, n int) {
 
 	go func(data *TreadSafeMap) {
 		for i := 0; i < n; i++ {
-			for {
-				if value, ok := data.LoadAndDelete(i); ok {
-					output <- value
-					break
-				}
-
-				runtime.Gosched()
-			}
+			output <- data.MustLoadAndDelete(i)
 		}
 	}(data)
 
