@@ -1,5 +1,9 @@
 package main
 
+import (
+	"sync"
+)
+
 const (
 	maxGoroutinesPerWorker = 100
 )
@@ -11,8 +15,8 @@ func Merge2Channels(fn func(int) int, in1, in2 <-chan int, out chan<- int, n int
 func merge2Channels(fn func(int) int, input1, input2 <-chan int, out chan<- int, n int) {
 	result1, result2 := make(chan int), make(chan int)
 
-	go worker(fn, input1, result1, n)
-	go worker(fn, input2, result2, n)
+	go newWorker(fn, input1, result1, n).Run()
+	go newWorker(fn, input2, result2, n).Run()
 
 	for i := 0; i < n; i++ {
 		sum := <-result1 + <-result2
@@ -20,24 +24,51 @@ func merge2Channels(fn func(int) int, input1, input2 <-chan int, out chan<- int,
 	}
 }
 
-func worker(fn func(int) int, input <-chan int, output chan<- int, n int) {
-	semaphore := make(chan struct{}, maxGoroutinesPerWorker)
+func newWorker(fn func(int) int, input <-chan int, output chan<- int, n int) *worker {
+	semaphore := NewSemaphore(maxGoroutinesPerWorker)
 
-	data := NewTreadSafeMap(maxGoroutinesPerWorker)
+	return &worker{
+		fn:        fn,
+		input:     input,
+		output:    output,
+		n:         n,
+		semaphore: semaphore,
 
-	go func(data *TreadSafeMap) {
-		for i := 0; i < n; i++ {
-			output <- data.MustLoadAndDelete(i)
-		}
-	}(data)
-
-	for i := 0; i < n; i++ {
-		semaphore <- struct{}{}
-		go run(fn, <-input, i, data, semaphore)
+		cond: sync.Cond{L: new(sync.Mutex)},
 	}
 }
 
-func run(fn func(int) int, arg int, jobId int, data *TreadSafeMap, semaphore <-chan struct{}) {
-	data.Store(jobId, fn(arg))
-	<-semaphore
+type worker struct {
+	fn        func(int) int
+	input     <-chan int
+	output    chan<- int
+	n         int
+	semaphore Semaphore
+
+	cond         sync.Cond
+	currentJobId int
+}
+
+func (w *worker) Run() {
+	for i := 0; i < w.n; i++ {
+		w.semaphore.Acquire()
+		go w.run(<-w.input, i)
+	}
+}
+
+func (w *worker) run(arg int, jobId int) {
+	defer w.semaphore.Release()
+
+	result := w.fn(arg)
+
+	w.cond.L.Lock()
+	defer w.cond.L.Unlock()
+
+	for jobId != w.currentJobId {
+		w.cond.Wait()
+	}
+
+	w.output <- result
+	w.currentJobId++
+	w.cond.Broadcast()
 }

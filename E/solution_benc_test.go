@@ -56,7 +56,9 @@ func BenchmarkMerge2Channels(b *testing.B) {
 
 			go send(input1, bench.arg, b.N)
 			go send(input2, bench.arg, b.N)
+
 			b.ReportAllocs()
+			b.ResetTimer()
 
 			Merge2Channels(bench.fn, input1, input2, output, b.N)
 			receive(output, b.N)
